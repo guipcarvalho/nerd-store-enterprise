@@ -76,23 +76,30 @@ namespace NSE.Identidade.API.Controllers
             return CustomResponse();
         }
 
-        private async Task<UserLoginResponse> GenerateJwt(string? email)
+        private async Task<IList<Claim>> GetClaims(IdentityUser? user)
         {
-            var user = await _userManager.FindByEmailAsync(email);
+            if(user == null)
+                throw new ArgumentNullException(nameof(user));
+
+
+            var roles = await _userManager.GetRolesAsync(user);
             var claims = await _userManager.GetClaimsAsync(user);
-            var userRoles = await _userManager.GetRolesAsync(user);
 
             claims.Add(new Claim(JwtRegisteredClaimNames.Sub, user.Id));
             claims.Add(new Claim(JwtRegisteredClaimNames.Email, user.Email));
             claims.Add(new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()));
 
-            foreach (var userRole in userRoles)
+            roles ??= new List<string>();
+            foreach (var userRole in roles)
             {
                 claims.Add(new Claim("role", userRole));
             }
 
-            var identityClaims = new ClaimsIdentity(claims);
+            return claims;
+        }
 
+        private string EncodeToken(ClaimsIdentity claims)
+        {
             var tokenHandler = new JwtSecurityTokenHandler();
             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtSettings.Secret));
 
@@ -100,16 +107,22 @@ namespace NSE.Identidade.API.Controllers
             {
                 Issuer = _jwtSettings.ValidIssuer,
                 Audience = _jwtSettings.ValidAudience,
-                Subject = identityClaims,
+                Subject = claims,
                 Expires = DateTime.UtcNow.AddHours(_jwtSettings.ExpirationHours),
                 SigningCredentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256Signature)
             });
 
-            var encodedToken = tokenHandler.WriteToken(token);
+            return tokenHandler.WriteToken(token);
+        }
+
+        private async Task<UserLoginResponse> GenerateJwt(string? email)
+        {
+            var user = await _userManager.FindByEmailAsync(email);
+            var claims = await GetClaims(user);
 
             return new UserLoginResponse
             {
-                AccessToken = encodedToken,
+                AccessToken = EncodeToken(new ClaimsIdentity(claims)),
                 ExpiresIn = TimeSpan.FromHours(_jwtSettings.ExpirationHours).TotalSeconds,
                 UserToken = new UserToken
                 {
