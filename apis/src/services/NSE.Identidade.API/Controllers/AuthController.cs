@@ -12,7 +12,7 @@ namespace NSE.Identidade.API.Controllers
 {
     [ApiController]
     [Route("v1/auth")]
-    public class AuthController : Controller
+    public class AuthController : MainController
     {
         private readonly SignInManager<IdentityUser> _signInManager;
         private readonly UserManager<IdentityUser> _userManager;
@@ -32,7 +32,7 @@ namespace NSE.Identidade.API.Controllers
         [ProducesResponseType(400, Type = typeof(IdentityResult))]
         public async Task<IActionResult> Register(UserRegistration userRegistration)
         {
-            if(!ModelState.IsValid) return BadRequest(ModelState);
+            if(!ModelState.IsValid) return CustomResponse(ModelState);
 
             var user = new IdentityUser
             {
@@ -45,24 +45,35 @@ namespace NSE.Identidade.API.Controllers
 
             if (result.Succeeded)
             {
-                await _signInManager.SignInAsync(user, isPersistent: false);
-                return Ok(await GenerateJwt(user.Email));
+                return CustomResponse(await GenerateJwt(user.Email));
             }
 
-            return BadRequest(result);
+            foreach (var error in result.Errors)
+            {
+                AddOperationError(error.Description);
+            }
+
+            return CustomResponse();
         }
 
         [HttpPost("login")]
         public async Task<IActionResult> Login(UserLogin userLogin)
         {
-            if (!ModelState.IsValid) return BadRequest(ModelState);
+            if (!ModelState.IsValid) return CustomResponse(ModelState);
 
             var result = await _signInManager.PasswordSignInAsync(userLogin.Email, userLogin.Password, false, true);
 
             if (result.Succeeded)
-                return Ok(await GenerateJwt(userLogin.Email));
+                return CustomResponse(await GenerateJwt(userLogin.Email));
 
-            return BadRequest();
+            if (result.IsLockedOut)
+            {
+                AddOperationError("Usuário temporariamente bloqueado por tentativas inválidas");
+                return CustomResponse();
+            }
+                
+            AddOperationError("Usuário ou senha incorretos");
+            return CustomResponse();
         }
 
         private async Task<UserLoginResponse> GenerateJwt(string? email)
